@@ -1,0 +1,490 @@
+---
+title: "Fort Worth Climate Change"
+author: "Ethan Campbell"
+date: "5/3/2022"
+output: html_document
+---
+
+<style>
+html {
+  scroll-behavior: smooth;
+}
+#TOC {
+  position: relative;
+  z-index: 50;
+  background: #ebebeb;
+  padding: 10px;
+  border-radius: 5px;
+}
+@media screen and (max-width: 900px) {
+#TOC {
+    position: relative;
+  }
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(plyr)
+library(dplyr)
+library(rsconnect)
+library(tidyr)
+library(ggridges)
+library(viridis)
+library(viridisLite)
+library(kableExtra)
+library(gganimate)
+library(distill)
+library(lubridate)
+library(leaflet)
+library(tibble)
+library(ggplot2)
+library(ggrepel)
+library(plotly)
+library(ggthemes)
+```
+
+
+# Introduction
+In recent years, climate change has presented itself at the forefront of political debate. More specifically, the discussion surrounding climate change in Texas, a nationally critical source for food, has grown exponentially. Recent events like the polar vortex and the 2021 snowstorm have forced people to consider the effects of climate change in a new light and has led me to question the changes taking place in my own area: Dallas-Fort Worth. With this data set, I would like to investigate the changes in climate over the last 40 years to gain more insight into the question of climate change in Texas.
+
+# Data
+
+Data used in this study was gathered from the web mapping application from NASA Prediction of Worldwide Energy Resources. This data set provided information regarding wind, temperature, surface pressure, precipitation, and humidity. However, the factors I will be analyzing are temperature, humidity, and precipitation as these relate to climate change and to one another. Below, I have included an interactive map of Fort Worth, TX for those unfamiliar with the area. Further down the road, I would like to incorporate the other factors for a more comprehensive comparison, and set up a system that will consistently update for more reliable findings.
+
+```{r}
+leaflet() %>%
+  addTiles() %>%
+  addMarkers(lng=-97.3225, lat=32.756, popup="Fort Worth")
+
+```
+
+
+
+# Manipulating data
+  I began by inputting data and reviewing it to identify any changes that needed to be made. This process demonstrated a necessity to clean the data before the analytic process could begin. I first created a data column using lubridate. Afterwards, I created an annual column for each variable by utilizing the mean spread out over a one-year period for each year. For the visualization process, I added in an abbreviation for each month which replaced the numeric number representation with the previously assigned abbreviation. This created a more palatable understanding of the complex data set originally presented. In the first data table below are the data types of each column within this study.
+
+```{r}
+
+Fort_Worth_2022 <- read.csv("Fort_Worth_climate_with_day.csv", skip = 14)
+Fort_Worth <- read.csv("Fort_Worth_climate.csv", skip = 18)
+
+dim(Fort_Worth_2022)
+dim(Fort_Worth)
+colnames(Fort_Worth_2022)
+colnames(Fort_Worth)
+
+Month_combined <- Fort_Worth %>%
+pivot_longer(
+  cols = c(NOV, JAN, FEB, MAR, APR, MAY, JUN, JUL, AUG, SEP, OCT, DEC),
+  names_to = "MONTH",
+  values_to = "Month_AVG",
+)
+
+Para_split <- Month_combined %>%
+  pivot_wider(names_from = PARAMETER,
+              values_from = Month_AVG,
+              )
+
+
+FW_Updated <- Fort_Worth_2022 %>%
+  dplyr::rename(Temperature = T2M) %>%
+  dplyr::rename(Humidity = RH2M) %>%
+  dplyr::rename(Wind_Speed = WS2M) %>%
+  dplyr::rename(Surface_Pressure = PS)
+
+
+FW_Updated$Date <- with(FW_Updated, ymd(sprintf('%04d%02d%02d', YEAR, MO, Day)))
+
+
+YEAR <- format(as.Date(FW_Updated$Date), format = "%Y")
+ 
+Means_variables <- ddply(FW_Updated, .(YEAR), summarise,
+      Annual_Temperature = mean(Temperature),
+      Annual_Humidity = mean(Humidity),
+      Annual_Precipitation = mean(PRECTOTCORR))
+
+Final_FW <- merge(FW_Updated, Means_variables, by = "YEAR")
+
+
+Final_FW <- transform(Final_FW, MonthAbb = month.abb[MO])
+
+rmarkdown::paged_table(Final_FW)
+
+
+
+```
+
+
+# Temperature
+
+ Though initial cleaning allowed me to begin working with the data, further edits were required for each subsection. To begin, we mutated to adjust from Celsius to Fahrenheit and selected the columns that would significantly impact this section. I decided to begin by investigating when temperature was the highest and lowest between the 40 years included and found that it was at its peak in August of 2011 and its lowest in December of 1989. The following graphs show the change in temperature by month with the first graph identifying the number of occurrences for each month being over 5 degrees. The second graph shows the full range of temperature per month. Here, the unexpectedly large standard deviation of 17.3 indicates that there is a wide range in values in temperature. This is to be expected considering the annual range of temperature is rather large.
+
+```{r}
+Temperature_Final <- Final_FW %>%
+  mutate(Temperature = Temperature * 9/5 + 32) %>%
+  mutate(Annual_Temp = Annual_Temperature * 9/5 + 32) %>%
+  select(Date, YEAR, MO, Day, MonthAbb, Temperature, Annual_Temp) %>%
+  na.omit(Temperature)
+
+
+# When was Temperature the highest (Aug of 2011)
+
+TF_highest <- Temperature_Final %>%
+  select(Date,Temperature, Annual_Temp) %>%
+  arrange(desc(Temperature)) %>%
+  slice(1:12)
+
+kable(TF_highest, digits = 4, align = "ccccccc", col.names = c("Date", "Temperature", "Annual Temperature"), caption = "Highest Temperature Since 1981") %>%
+  kable_styling(font_size = 16) %>%
+  row_spec(c(1,1,1), background = "red")
+
+# When was Temperature the lowest (Dec of 1989)
+
+TF_lowest <- Temperature_Final %>%
+  select(Date, Temperature, Annual_Temp) %>%
+  arrange(Temperature) %>%
+  na.omit(Temperature) %>%
+  slice(1:12)
+
+kable(TF_lowest, digits = 4, align = "ccccccc", col.names = c("Date", "Temperature", "Annual Temperature"), caption = "Lowest Temperature Since 1981") %>%
+  kable_styling(font_size = 16) %>%
+  row_spec(c(1,1,1), background = "cadetblue")
+
+TF_stats <- Temperature_Final %>%
+  select(Date, Temperature, Annual_Temp) %>%
+  mutate(Mean = mean(Temperature)) %>%
+  mutate(Standard_Deviation = sd(Temperature)) %>%
+  mutate(Median = median(Temperature)) %>%
+  slice(1:12)
+
+kable(TF_stats, digits = 4, align = "ccccccc", col.names = c("Date", "Temperature", "Annual Temperature", "Mean", "Standard Deviation", "Median"), caption = "Statistical Temperature Data") %>%
+  kable_styling(font_size = 16) %>%
+  row_spec(c(1,1,1,1,1,1))
+
+Temperature_Final %>%
+drop_na(Temperature) %>%
+filter(Temperature > 0) %>%
+ggplot(aes(Temperature, fill = MonthAbb), label = "Month") +
+geom_density(mapping = aes(color = Temperature), alpha = 0.5) +
+facet_wrap(~MonthAbb) +
+theme_fivethirtyeight(base_size = 10, base_family = 'serif') +
+  theme(axis.title = element_text(family = 'serif', size = 15)) + ylab('Percent Changed') + xlab('Years') +
+  labs(title = "Temperature Density Graph Greater Than 0 [F]", caption = "Facet Grid of each month exceeding the temperature of 0 [F]")
+
+
+
+Temperature_Final %>%
+ggplot(mapping = aes(x = Temperature, y = MO, group = MO, fill = ..x..)) +
+geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01,
+alpha = 5) +
+scale_fill_viridis(name = "Temp. [F]", option = "C") +
+theme_fivethirtyeight(base_size = 10, base_family = 'serif') +
+  theme(axis.title = element_text(family = 'serif', size = 15)) + ylab('Months') + xlab('Temperature [F]') +
+  labs(title = "Mean Temperature Range for Each Month", caption = "")
+
+
+```
+
+## Temperature percent change
+ Here, the temperature column was collapsed to analyze the percent change from year to year. There is a fairly even back and forth in terms of percent change every 3 years. The next portion is the Temperature change difference from 1981. Here, we see that the temperature actually increased by almost 2%. To make the visualization portion easier to the audience, I made it every 3 years instead of 1. The temperature since 1981 tends to lean towards a higher number more frequently than a lower number; however, the amount isn’t significant enough to call it a complete temperature change and may be attributed to a natural variation in temperature.
+
+```{r}
+TF <- Temperature_Final %>%
+  distinct(YEAR, Annual_Temp)
+
+TF <- TF %>%
+  slice(which(row_number() %% 3 == 1))
+
+YearOneprepTemp <- TF[1,c("Annual_Temp")]
+
+Temp_change <- TF %>%
+  dplyr::mutate(Previous = lag(Annual_Temp),
+                Next_temp = lead(Annual_Temp),
+                change_temp = Annual_Temp - Previous,
+                Percent_temp = (change_temp/Previous)* 100,
+                Percent_change_temp = (change_temp/lag(Annual_Temp) -1) * 100,
+                TChange_from_year_one = (Annual_Temp/YearOneprepTemp - 1) * 100)
+
+
+Temp_change <- Temp_change %>%
+  select(YEAR, Annual_Temp, Percent_temp, TChange_from_year_one)
+
+
+ggplot(data = Temp_change) +
+  geom_col(aes(x = YEAR, y = Percent_temp, fill = Percent_temp > 0), alpha = .2) +
+  geom_text(aes(x = YEAR, y = Percent_temp, label = paste0(round(Percent_temp,2), "%")),size = 3, vjust = -.5) +
+   theme_fivethirtyeight(base_size = 10, base_family = 'serif') +
+  theme(axis.title = element_text(family = 'serif', size = 15)) + ylab('Percent Changed') + xlab('Years') +
+  labs(title = "Temperature Percent Change Over 40 Years [%]", caption = "3 Year time gaps")
+
+
+ggplot(data = Temp_change) +
+  geom_col(aes(x = YEAR, y = TChange_from_year_one, fill = TChange_from_year_one > 0), alpha = .2) +
+  geom_text(aes(x = YEAR, y = TChange_from_year_one, label =  paste0(round(TChange_from_year_one,2), "%")),size = 3, vjust = -.5) +
+  theme_fivethirtyeight(base_size = 10, base_family = 'serif') +
+  theme(axis.title = element_text(family = 'serif', size = 15)) + ylab('Percent Changed') + xlab('Years') +
+  labs(title = "Temperature Percent Change From 1981 [%]", caption = "3 Year time gaps")
+```
+
+# Precipitation
+
+  Prior to beginning data analysis, I predicted precipitation would reveal the greatest differences because of the abnormal trend of higher precipitation rates in Texas. Similar to the temperature, I elected to pull the highest and lowest precipitation months. This showed October of 1981 being the month with the highest amount of precipitation with 15.63 inches and January of 1986 being the lowest with .0098 inches. The animated plot chart includes the precipitation of months by year. This shows us which months usually have the highest and lowest in addition to what their range is. The standard deviation in this section is 2.18 which is high; however, considering the abnormality of precipitation in the last few years, it is surprising this number isn’t higher. Subjectively, my experience with Texas climate has indicating increasing precipitation. 5-7 years ago, my town went through a drought, and then was followed with a flood season and eventually a major winter storm. I expected the dramatic shift between these events to create a larger standard deviation.
+
+```{r}
+Precipitation_Final <- Para_split %>%
+  mutate(Precipitation_annual = ANN / 25.4) %>%
+  mutate(Precipitation_Monthly = PRECTOTCORR_SUM / 25.4) %>%
+  select(YEAR, MONTH, Precipitation_Monthly, Precipitation_annual) %>%
+  na.omit(Precipitation_Monthly)
+
+
+# When was precipitation the highest (OCT of 1981)
+
+PF_highest <- Precipitation_Final %>%
+  select(YEAR, MONTH, Precipitation_Monthly, Precipitation_annual) %>%
+  arrange(desc(Precipitation_Monthly)) %>%
+  na.omit(Precipitation_Monthly) %>%
+  slice(1:12)
+
+kable(PF_highest, digits = 4, align = "ccccccc", col.names = c("Year", "Month","Precipiation", "Annual Precipitation"), caption = "Highest Monthly Mean Precipitation since 1981") %>%
+  kable_styling(font_size = 16) %>%
+  row_spec(c(1,1,1))
+# When was it the lowest (Jan of 1986)
+
+PF_lowest <- Precipitation_Final %>%
+  select(YEAR, MONTH, Precipitation_Monthly, Precipitation_annual) %>%
+  arrange(Precipitation_Monthly) %>%
+  na.omit(Precipitation_Monthly) %>%
+  slice(1:12)
+
+kable(PF_lowest, digits = 4, align = "ccccccc", col.names = c("Year", "Month","Precipiation", "Annual Precipitation"), caption = "Lowest Monthly Mean Precipitation since 1981") %>%
+  kable_styling(font_size = 16) %>%
+  row_spec(c(1,1,1))
+
+
+PF_stats <- Precipitation_Final %>%
+  select(YEAR, MONTH, Precipitation_Monthly, Precipitation_annual) %>%
+  mutate(Mean = mean(Precipitation_Monthly)) %>%
+  mutate(Standard_Deviation = sd(Precipitation_Monthly)) %>%
+  mutate(Median = median(Precipitation_Monthly)) %>%
+  slice(1:12)
+
+kable(PF_stats, digits = 4, align = "ccccccc", col.names = c("Year", "Month", "Monthly Precipitation", "Annual Precipitation", "Mean", "Standard Deviation", "Median"), caption = "Statistical Temperature Data") %>%
+  kable_styling(font_size = 16) %>%
+  row_spec(c(1,1,1,1,1,1,1))
+
+Precip_animate <- ggplot(Precipitation_Final, aes(x = YEAR, y = Precipitation_Monthly, color = MONTH, group = MONTH)) +
+    geom_path() +
+    geom_point() +
+    facet_wrap(~ MONTH) +
+    theme_fivethirtyeight(base_size = 10, base_family = 'serif') +
+  theme(axis.title = element_text(family = 'serif', size = 15)) + ylab('Years') + xlab('Monthly Precipitation (Inches)') +
+  labs(title = 'Precipitation Variation, Year: {frame_along}', caption = "Precipitation Change From 1981-2022") +
+  theme(panel.spacing.x=unit(1.5, "lines"), panel.spacing.y = unit(1, "lines")) +
+  transition_reveal(along = YEAR) +
+    ease_aes('linear')
+
+
+animate(Precip_animate, 100, 9)
+
+
+```
+
+## Precipitation precent change
+
+ Here, we find the percent change every 3 years, and one thing to note is the increase in precipitation in the last decade. Though unclear, the change from year 1 would initially not find agreement with either the code or the data type of my column because it continually switched the data type to data.table. As a placeholder, I added the interactive chart. However, I soon found that I had to remove the column name, incorporate the original value itself, then divide by each year following. Though my original code was not viable for this particular analysis, it allowed me to utilize critical thinking to approach problem solving. Looking at this table, we notice that there has been a decrease in precipitation by 13.48% which is very interesting. I expected this value to be positive .01 at the very lowest. However, when reading into the data, we notice that 1981 had 42.6 inches of rain that year while 2020 only had 36.86 inches resulting in the negative number. I reason that the social perception of greater precipitation may be attributed to receiving more precipitation in a shorter amount of time rather than spanned out over the year.
+
+```{r}
+PF <- Precipitation_Final %>%
+  select(YEAR, Precipitation_annual)
+
+PF <- PF %>%
+  distinct(YEAR, Precipitation_annual)
+
+PF <- PF %>%
+  slice(which(row_number() %% 3 == 1))
+
+Prep_Year_One_prep <- PF[1,c("Precipitation_annual")]
+
+Pct_change <- PF %>%
+  dplyr::mutate(Previous = lag(Precipitation_annual),
+                Next = lead(Precipitation_annual),
+                change = Precipitation_annual - Previous,
+                Percent = (change/Previous)* 100,
+                Percent_change = (change/lag(Precipitation_annual) -1) * 100)
+
+options(scipen = 999)
+
+Pct_change$Change_from_year_one <- (PF$Precipitation_annual/42.60591 - 1) * 100
+
+Pct_change <- Pct_change %>%
+  select(YEAR, Precipitation_annual, Percent, Change_from_year_one)
+
+ggplot(data = Pct_change) +
+  geom_col(aes(x = YEAR, y = Percent, fill = Percent > 0), alpha = .2) +
+  theme_classic() +
+  geom_text(aes(x = YEAR, y = Percent, label = paste0(round(Percent,2), "%")),size = 3, vjust = -.5) +
+      theme_fivethirtyeight(base_size = 10, base_family = 'serif') +
+  theme(axis.title = element_text(family = 'serif', size = 15)) + ylab('Percent Changed') + xlab('Years') +
+  labs(title = "Percipitation Percent Change Over 40 Years [%]", caption = "3 Year time gaps")
+
+
+ggplot(data = Pct_change) +
+ geom_col(aes(x = YEAR, y = Change_from_year_one, fill = Change_from_year_one > 0), alpha = .2) +
+  theme_classic() +
+  geom_text(aes(x = YEAR, y = Change_from_year_one, label = paste0(round(Change_from_year_one,2), "%")),size = 3, vjust = -.5) +
+      theme_fivethirtyeight(base_size = 10, base_family = 'serif') +
+  theme(axis.title = element_text(family = 'serif', size = 15)) + ylab('Percent Changed') + xlab('Years') +
+  labs(title = "Percipitation Percent Change From 1981 [%]", caption = "3 Year time gaps")
+
+Interactive_Precipitation_change <- Precipitation_Final %>%
+  ggplot( aes(YEAR, Precipitation_annual, size = Precipitation_annual, color=Precipitation_annual)) +
+  geom_point() +
+    theme_fivethirtyeight(base_size = 10, base_family = 'serif') +
+  theme(axis.title = element_text(family = 'serif', size = 15)) + ylab('Annual Precipitation [Inches]') + xlab('Years') +
+  labs(title = "Annual Precipitation Change Over 40 Years", caption = "")
+
+ggplotly(Interactive_Precipitation_change)
+```
+
+# Humidity
+
+  Out of all the variables, humidity was the easiest to work with due to its straightforward nature and lack of major edits. Once more, we looked at when humidity was the highest and lowest and noticed that in December of 2017, the humidity was its highest with a value of 97.44% while in October of 2015, it was at its lowest with a value of 20%. The standard deviation reached 15.00 which was incredibly and unexpectedly high compared to precipitation. In creating a bar graph to show which month reached the highest average humidity, I noticed April presented as the leading month. I also added a facet wrap split up by month to show each month’s change over the years.
+
+```{r, layout="1-body-outset"}
+rmarkdown::paged_table(Humidity_Final <- Final_FW %>%
+  select(Date, YEAR, MO, Day, MonthAbb, Humidity, Annual_Humidity) %>%
+  na.omit(Humidity))
+
+# When was humidity the highest (Jan of 1998)
+
+HF_highest <- Humidity_Final %>%
+  select(Date, Humidity, Annual_Humidity) %>%
+  arrange(desc(Humidity)) %>%
+  slice(1:12)
+
+kable(HF_highest, digits = 4, align = "ccccccc", col.names = c("Date", "Humidity", "Annual Humidity"), caption = "Highest Humidity Percent In One Day Since 1981") %>%
+  kable_styling(font_size = 16) %>%
+  row_spec(c(1,1,1))
+
+# When was humidity the lowest (Aug of 2000)
+
+HF_lowest <- Humidity_Final %>%
+  select(Date, Humidity, Annual_Humidity) %>%
+  arrange(Humidity) %>%
+  na.omit(Humidity) %>%
+  slice(1:12)
+
+kable(HF_lowest, digits = 4, align = "ccccccc", col.names = c("Date", "Humidity", "Annual Humidity"), caption = "Lowest Humidity Percent In One Day Since 1981") %>%
+  kable_styling(font_size = 16) %>%
+  row_spec(c(1,1,1))
+
+HF_stats <- Humidity_Final %>%
+  select(Date, Humidity, Annual_Humidity) %>%
+  mutate(Mean = mean(Humidity)) %>%
+  mutate(Standard_Deviation = sd(Humidity)) %>%
+  mutate(Median = median(Humidity)) %>%
+  slice(1:12)
+
+kable(HF_stats, digits = 4, align = "ccccccc", col.names = c("Date", "Humdity", "Annual Humdity", "Mean", "Standard Deviation", "Median"), caption = "Statistical Humidity Data") %>%
+  kable_styling(font_size = 16) %>%
+  row_spec(c(1,1,1,1,1,1))
+
+
+# change in humidity over years by each month
+
+ggplot(data = Humidity_Final, mapping = aes(x = Humidity)) +
+  geom_bar(mapping = aes(fill = MonthAbb), width = .5) +
+    guides(
+    color = guide_colorbar(
+      nrow = 1,
+      override.aes = list(size = 4)
+    )
+  ) +
+  theme_fivethirtyeight(base_size = 10, base_family = 'serif') +
+  theme(axis.title = element_text(family = 'serif', size = 15)) + ylab('Occurances') + xlab('Humidity [%]') +
+  labs(title = "Humidity Percent Occurance", caption = "")
+
+# Facet wrap of the previous graph to separate them
+
+ggplot(Humidity_Final, aes(YEAR, Humidity, colour = Humidity)) +
+  geom_point(size = 0.5) +
+  geom_smooth(mapping = aes(color = YEAR)) +
+  theme_fivethirtyeight(base_size = 10, base_family = 'serif') +
+  theme(axis.title = element_text(family = 'serif', size = 12)) + ylab('Humidity [%]') + xlab('Years') +
+  labs(title = "Humidity Percent Change By Each Month", caption = "") +
+  theme(panel.spacing.x=unit(.5, "lines") , panel.spacing.y=unit(.2,"lines")) +
+  facet_wrap(~MonthAbb)
+```
+
+## Percent change
+
+  Once more, I incorporated a percent change by every 3 years. Here, we noticed that over the last decade, there has been an increase in humidity which correlates with the precipitation changes. However, when we look at the change from year 1, we notice that there has actually been a decrease of humidity by .03%. This was another interesting finding because there is a correlation of 76.8%. With the major decrease in overall precipitation, I expected this number to correlate with that change.
+
+```{r}
+
+cor(Final_FW$Annual_Humidity,Final_FW$Annual_Precipitation)
+
+HF <- Humidity_Final %>%
+  select(YEAR, MO, Annual_Humidity, Humidity)
+
+HF <- HF %>%
+  distinct(YEAR, Annual_Humidity)
+HF <- HF %>%
+  slice(which(row_number() %% 3 == 1))
+HYearOneprep <- HF[1,c("Annual_Humidity")]
+
+HPct_change <- HF %>%
+  dplyr::mutate(hPrevious = lag(Annual_Humidity),
+                HNext = lead(Annual_Humidity),
+                Hchange = Annual_Humidity - hPrevious,
+                HPercent = (Hchange/hPrevious)* 100,
+                HPercent_change = (Hchange/lag(Annual_Humidity) -1) * 100,
+                Hum_Change_from_year_one = (Annual_Humidity/HYearOneprep - 1) * 100)
+
+
+HPct_change <- HPct_change %>%
+  select(YEAR, Annual_Humidity, HPercent, Hum_Change_from_year_one)
+
+ggplot(data = HPct_change) +
+  geom_col(aes(x = YEAR, y = HPercent, fill = HPercent > 0), alpha = .2) +
+  geom_text(aes(x = YEAR, y = HPercent, label = paste0(round(HPercent,2), "%")),size = 3, vjust = -.5) +
+    theme_fivethirtyeight(base_size = 10, base_family = 'serif') +
+  theme(axis.title = element_text(family = 'serif', size = 15)) + ylab('Percent Changed') + xlab('Years') +
+  labs(title = "Humidity Percent Change From 1981 [%]", caption = "3 Year time gaps")
+
+
+ggplot(data = HPct_change) +
+  geom_col(aes(x = YEAR, y = Hum_Change_from_year_one, fill = Hum_Change_from_year_one > 0), alpha = .2) +
+  geom_text(aes(x = YEAR, y = Hum_Change_from_year_one, label = paste0(round(Hum_Change_from_year_one,2), "%")),size = 3, vjust = -.5) +
+  theme_fivethirtyeight(base_size = 10, base_family = 'serif') +
+  theme(axis.title = element_text(family = 'serif', size = 15)) + ylab('Percent Changed') + xlab('Years') +
+  labs(title = "Humidity Percent Change Since 1981 [%]", caption = "3 Year time gaps")
+
+
+```
+
+# Conclusion: Has the climate changed?
+
+To appreciate the findings of this data analysis, it is vital to establish a baseline understanding of climate change. “Climate change is a long-term change in the average weather patterns that have come to define Earth’s local, regional and global climates” (NASA). Fort Worth’s current climate is humid subtropical which includes high temperatures, humid summers, and mild to cool winters. With this understanding, the details of this study may begin to be unpacked.
+
+When analyzing temperature, we noticed a fairly consistent alternating pattern in yearly temperatures. Another point to note is in comparing the year 1981 to 2022, we noticed an increase of 1.78%. Due to the fact that this is not a consistent increase nor is the change significant, we can assume this is within the range of the current climate. For
+yearly precipitation analysis, there was less little alternating between values, but larger numbers going in opposite directions. The difference between 1981 to 2022 showed a decrease of 13.48% however, the precipitation amounts have been increasing by roughly 15% every 3 years. In 2012, there was a decrease of 47.12% in temperature when compared to the year 1981 and this negative trend continued in subsequent years. There are two assumptions here, one: 1981 was an unusually high precipitation year, or two: there has simply been a decrease in the amount of precipitation in the last 40 years. However, option one is arguably less reliable because in 1990, we had an increase in precipitation of 9.61%. These findings indicate Fort Worth to have a climate in-between west Texas which is semi-arid and the typical humid subtropical of Fort Worth. This is supported by humidity which has shown something similar to temperature with a wave like motion of change over the years. The 1981 to 2022 change is -.03% which is less than the -17.96% trend of 2012. The difference compared to 1981 has been mostly negative except for 1990 again (similar to precipitation). This is expected as there is roughly a 77% correlation rate between these two factors. With a change of -.03%, we can attribute any changes in humidity during the last 40 years to the range variation of the humid subtropical climate.
+
+All factors considered, I believe there has not been any major changes in climate, and the difference we are seeing is simply the range inside of the humid subtropical climate. However, that is not to say that things could not change as we have seen with the precipitation. It should also be noted that this data analysis was completed on a micro level within the state of Texas in the Dallas-Fort Worth area. More inclusive analysis may reveal more significant findings pertaining to climate change. Data analysis is ongoing to lend more socially relevant conclusions.
+
+# Bibliography {.appendix}
+
+* NASA. Overview: Weather, Global Warming, and Climate Change. 2022. 17 April 2022. <https://climate.nasa.gov/resources/global-warming-vs-climate-change/>.
+
+* R Core Team (2021). R: A language and environment for statistical
+  computing. R Foundation for Statistical Computing, Vienna, Austria.
+  URL <https://www.R-project.org/>.
+
+* Research, NASA Langley. The POWER Project. 08 May 2021. 21 February 2022. <https://power.larc.nasa.gov.>.
+
+  * (“These data were obtained from the NASA Langley Research Center (LaRC) POWER Project funded through the NASA Earth Science/Applied Science Program.”)
+
+* Wickham, Hadley and Garrett Grolemund. R for Data Science. O'REILLY, 2017. <https://r4ds.had.co.nz>.
