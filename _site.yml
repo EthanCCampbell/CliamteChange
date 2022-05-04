@@ -1,0 +1,12 @@
+name: "Fort Worth Climate Change"
+output_dir: "docs"
+navbar:
+  title: "Climate Change"
+  left:
+  - text: "Home"
+    href: index.html
+  - text: "Fort Worth Climate Change"
+    href: ChangeinClimate.html
+output:
+  html_document:
+    theme: cosmo
